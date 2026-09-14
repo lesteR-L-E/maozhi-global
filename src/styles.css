@@ -228,8 +228,12 @@ button {
   font-size: 11px;
 }
 .header-actions {
+  position: relative;
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 5px;
+  --action-size: 34px;
+  --action-gap: 5px;
 }
 .icon-button,
 .close-button {
@@ -241,36 +245,31 @@ button {
   font-size: 18px;
 }
 .icon-button {
-  width: 34px;
-  height: 34px;
+  position: relative;
+  width: var(--action-size);
+  height: var(--action-size);
   border-radius: 9px;
 }
 .icon-button:hover {
   background: #f0f4f8;
   color: #2f668f;
 }
-.session-strip {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 9px 22px 0;
+.action-glyph {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 21px;
+  line-height: 1;
+  font-weight: 500;
 }
-.session-chip {
-  max-width: 140px;
-  overflow: hidden;
-  padding: 5px 9px;
-  border: 1px solid #e2e9f0;
-  border-radius: 8px;
-  color: #8292a4;
-  background: #fbfcfd;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.new-session-glyph {
+  font-size: 15px;
+  font-weight: 600;
 }
-.session-chip.active {
-  border-color: #9bbbd5;
-  color: #3979ac;
-  background: #f2f8fc;
+.history-icon {
+  font-size: 20px;
+  transform: translateY(-1px);
 }
 .conversation {
   flex: 1 1 auto;
@@ -340,6 +339,59 @@ button {
 .error-bubble {
   color: #a54b4b;
   background: #fff1f1;
+}
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(82%, 430px);
+  margin: -8px 0 15px 37px;
+  padding: 7px 11px;
+  border: 1px solid #dfe8f0;
+  border-radius: 10px;
+  background: #f7fafc;
+  color: #8494a6;
+  font-size: 11px;
+}
+.tool-status {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e0a94d;
+}
+.tool-status.running {
+  animation: tool-pulse 1s infinite ease-in-out;
+}
+.tool-status.done {
+  background: #54b486;
+}
+.tool-status.failed {
+  background: #d47c7c;
+}
+.tool-name {
+  flex: 0 0 auto;
+  color: #3979ac;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+.tool-state {
+  flex: 0 0 auto;
+}
+.tool-result {
+  overflow: hidden;
+  color: #97a5b4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes tool-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .typing-bubble {
   display: flex;
@@ -466,6 +518,102 @@ button {
   border-radius: 16px;
   background: white;
   box-shadow: 0 20px 60px rgba(33, 59, 84, 0.2);
+}
+.history-dialog {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 330px;
+  max-height: min(500px, calc(100vh - 110px));
+  padding: 16px;
+  border: 1px solid #e3eaf1;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 14px 34px rgba(33, 59, 84, 0.16);
+}
+.history-dialog::before {
+  position: absolute;
+  top: -6px;
+  right: calc(var(--action-size) + var(--action-gap) + 12px);
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid #e3eaf1;
+  border-left: 1px solid #e3eaf1;
+  background: white;
+  content: "";
+  transform: rotate(45deg);
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.history-empty {
+  padding: 36px 12px;
+  color: #9aa8b7;
+  text-align: center;
+  font-size: 12px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #53677b;
+  background: #f8fafc;
+  text-align: left;
+  transition:
+    border 0.16s,
+    background 0.16s;
+}
+.history-item:hover {
+  border-color: #c6dceb;
+  background: #f2f8fc;
+}
+.history-item.active {
+  border-color: #9bbbd5;
+  background: #eef7fc;
+}
+.history-item-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  color: #5d89aa;
+  background: #deedf7;
+  font-size: 16px;
+}
+.history-item-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+.history-item-copy strong {
+  overflow: hidden;
+  color: #40586f;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-item-copy small {
+  color: #9aa8b7;
+  font-size: 10px;
+}
+.history-current {
+  color: #4d8bb4;
+  font-size: 10px;
 }
 .dialog-heading {
   display: flex;

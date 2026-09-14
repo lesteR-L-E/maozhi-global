@@ -1,9 +1,10 @@
-export type ChatRole = 'system' | 'user' | 'assistant'
+export type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } }
 
-export type ChatMessage = {
-  role: ChatRole
-  content: string
-}
+export type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; tool_calls?: ToolCall[] }
+  | { role: 'tool'; content: string; tool_call_id: string; name: string }
 
 export type ProviderConfig = {
   provider: 'deepseek' | 'openai-compatible'
@@ -12,27 +13,41 @@ export type ProviderConfig = {
   baseUrl?: string
 }
 
-export type ProviderResponse = {
-  ok: boolean
-  content?: string
-  error?: { code: string; message: string }
-  usage?: { promptTokens?: number; completionTokens?: number }
+export type Usage = { promptTokens: number; completionTokens: number }
+
+export type ToolSchema = {
+  type: 'function'
+  function: { name: string; description: string; parameters: Record<string, unknown> }
 }
 
-export type StreamEvent =
+export type StreamOnceResult =
+  | { status: 'ok'; content: string; toolCalls: ToolCall[]; usage?: { promptTokens?: number; completionTokens?: number } }
+  | { status: 'aborted' }
+  | { status: 'error'; error: { code: string; message: string } }
+
+export type AgentStreamEvent =
   | { type: 'chunk'; content: string }
-  | { type: 'done'; usage?: { promptTokens?: number; completionTokens?: number } }
+  | { type: 'tool_start'; callId: string; name: string; argsText: string }
+  | { type: 'tool_result'; callId: string; name: string; ok: boolean; content: string }
+  | { type: 'done'; usage: Usage }
   | { type: 'error'; error: { code: string; message: string } }
 
-type OpenAIResponse = {
-  choices?: Array<{ message?: { content?: string } }>
+type ToolCallFragment = { index?: number; id?: string; function?: { name?: string; arguments?: string } }
+
+type StreamChunk = {
+  choices?: Array<{
+    delta?: { content?: string | null; tool_calls?: ToolCallFragment[] }
+    finish_reason?: string | null
+  }>
   usage?: { prompt_tokens?: number; completion_tokens?: number }
-  error?: { message?: string; type?: string }
+  error?: { message?: string }
 }
 
-const SYSTEM_PROMPT = `你是“贸智全球”的智能决策助手。目前处于第一版骨架阶段，暂未接入贸易、客户或其他业务工具。
-你的职责是理解用户问题并进行自然语言交流。不要编造任何贸易数据、客户数据、市场排名、预测、评分或工具调用结果。
-如果用户要求分析具体市场、客户或指标，请明确说明当前工具尚未接入，并告诉用户后续会基于结构化数据完成，而不是假装已经完成分析。
+type HttpErrorBody = { error?: { message?: string; type?: string } }
+
+const SYSTEM_PROMPT = `你是“贸智全球”的智能决策助手，运行在本地 Agent 运行时中。
+你可以调用工具完成任务：当前可用工具为 greet_user（为用户生成一段欢迎语）。当用户发送问候（如“你好”“您好”“hi”）时，必须调用 greet_user，再基于工具返回的内容组织自然、口语化的回复；其他常规问题直接回答。
+当前尚未接入贸易、客户、市场等真实数据工具。不要编造任何贸易数据、客户数据、市场排名、预测、评分或工具调用结果；如果用户要求分析具体市场、客户或指标，请明确说明相关工具尚未接入，后续会基于结构化数据完成。
 回答使用中文，简洁、专业、可执行；如果用户的问题缺少必要信息，可以提出澄清问题。`
 
 function effectiveConfig(config: ProviderConfig): ProviderConfig {
@@ -64,62 +79,31 @@ export class AgentRuntime {
     this.controllers.delete(requestId)
   }
 
-  async run(messages: ChatMessage[], config: ProviderConfig): Promise<ProviderResponse> {
-    config = effectiveConfig(config)
+  // 单次 LLM 调用：流式返回文本增量，结束后给出本次调用产生的完整 tool_calls
+  async streamOnce(options: {
+    messages: ChatMessage[]
+    config: ProviderConfig
+    tools: ToolSchema[]
+    onChunk: (content: string) => void
+    requestId?: string
+  }): Promise<StreamOnceResult> {
+    const config = effectiveConfig(options.config)
     if (!config.apiKey.trim()) {
-      return { ok: false, error: { code: 'MISSING_API_KEY', message: '请先在右上角配置LLM API Key。' } }
+      return { status: 'error', error: { code: 'MISSING_API_KEY', message: '请先在右上角配置LLM API Key。' } }
     }
 
-    const normalized = messages.filter((message) => message.role !== 'system')
+    const history = options.messages.filter((message) => message.role !== 'system')
     const body = {
       model: config.model,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...normalized],
+      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
       temperature: 0.4,
-      stream: false
-    }
-    const baseUrl = (config.baseUrl || (config.provider === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.openai.com')).replace(/\/$/, '')
-
-    try {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey.trim()}` },
-        body: JSON.stringify(body)
-      })
-      const data = (await response.json()) as OpenAIResponse
-      if (!response.ok) {
-        return { ok: false, error: { code: data.error?.type || `HTTP_${response.status}`, message: data.error?.message || 'LLM请求失败。' } }
-      }
-      const content = data.choices?.[0]?.message?.content?.trim()
-      if (!content) return { ok: false, error: { code: 'EMPTY_RESPONSE', message: 'LLM返回了空内容，请重试。' } }
-      return {
-        ok: true,
-        content,
-        usage: { promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '无法连接LLM服务。'
-      return { ok: false, error: { code: 'NETWORK_ERROR', message } }
-    }
-  }
-
-  async stream(messages: ChatMessage[], config: ProviderConfig, onEvent: (event: StreamEvent) => void, requestId?: string): Promise<void> {
-    config = effectiveConfig(config)
-    if (!config.apiKey.trim()) {
-      onEvent({ type: 'error', error: { code: 'MISSING_API_KEY', message: '请先在右上角配置LLM API Key。' } })
-      return
-    }
-
-    const normalized = messages.filter((message) => message.role !== 'system')
-    const body = {
-      model: config.model,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...normalized],
-      temperature: 0.4,
-      stream: true
+      stream: true,
+      ...(options.tools.length ? { tools: options.tools, tool_choice: 'auto' } : {})
     }
     const baseUrl = (config.baseUrl || (config.provider === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.openai.com')).replace(/\/$/, '')
 
     const controller = new AbortController()
-    if (requestId) this.controllers.set(requestId, controller)
+    if (options.requestId) this.controllers.set(options.requestId, controller)
     try {
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -128,29 +112,43 @@ export class AgentRuntime {
         signal: controller.signal
       })
       if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as OpenAIResponse
-        onEvent({ type: 'error', error: { code: data.error?.type || `HTTP_${response.status}`, message: data.error?.message || 'LLM请求失败。' } })
-        return
+        const data = (await response.json().catch(() => ({}))) as HttpErrorBody
+        return { status: 'error', error: { code: data.error?.type || `HTTP_${response.status}`, message: data.error?.message || 'LLM请求失败。' } }
       }
       if (!response.body) {
-        onEvent({ type: 'error', error: { code: 'NO_STREAM', message: 'LLM服务未返回可读取的流。' } })
-        return
+        return { status: 'error', error: { code: 'NO_STREAM', message: 'LLM服务未返回可读取的流。' } }
       }
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let content = ''
+      let streamError = ''
       let usage: { promptTokens?: number; completionTokens?: number } | undefined
+      // 流式 tool_calls 按index分片到达：id/name在首个分片，arguments逐段追加
+      const toolCalls = new Map<number, ToolCall>()
+      const mergeToolCall = (fragment: ToolCallFragment) => {
+        const index = fragment.index ?? 0
+        const existing = toolCalls.get(index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
+        if (fragment.id) existing.id = fragment.id
+        if (fragment.function?.name) existing.function.name = existing.function.name || fragment.function.name
+        if (fragment.function?.arguments) existing.function.arguments += fragment.function.arguments
+        toolCalls.set(index, existing)
+      }
       const consume = (line: string) => {
         if (!line.startsWith('data:')) return
         const payload = line.slice(5).trim()
         if (!payload || payload === '[DONE]') return
         try {
-          const data = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; error?: { message?: string } }
-          const content = data.choices?.[0]?.delta?.content
-          if (content) onEvent({ type: 'chunk', content })
+          const data = JSON.parse(payload) as StreamChunk
+          const delta = data.choices?.[0]?.delta
+          if (delta?.content) {
+            content += delta.content
+            options.onChunk(delta.content)
+          }
+          delta?.tool_calls?.forEach(mergeToolCall)
           if (data.usage) usage = { promptTokens: data.usage.prompt_tokens, completionTokens: data.usage.completion_tokens }
-          if (data.error) onEvent({ type: 'error', error: { code: 'LLM_STREAM_ERROR', message: data.error.message || 'LLM流式响应失败。' } })
+          if (data.error) streamError = data.error.message || 'LLM流式响应失败。'
         } catch {
           // Providers may split a JSON payload across chunks; incomplete lines remain buffered.
         }
@@ -164,13 +162,14 @@ export class AgentRuntime {
         lines.forEach(consume)
         if (done) break
       }
-      onEvent({ type: 'done', usage })
+      if (streamError) return { status: 'error', error: { code: 'LLM_STREAM_ERROR', message: streamError } }
+      const calls = [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call)
+      return { status: 'ok', content: content.trim(), toolCalls: calls, usage }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return
-      const message = error instanceof Error ? error.message : '无法连接LLM服务。'
-      onEvent({ type: 'error', error: { code: 'NETWORK_ERROR', message } })
+      if (error instanceof Error && error.name === 'AbortError') return { status: 'aborted' }
+      return { status: 'error', error: { code: 'NETWORK_ERROR', message: error instanceof Error ? error.message : '无法连接LLM服务。' } }
     } finally {
-      if (requestId) this.controllers.delete(requestId)
+      if (options.requestId) this.controllers.delete(options.requestId)
     }
   }
 }

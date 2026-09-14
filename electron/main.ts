@@ -1,34 +1,12 @@
 import 'dotenv/config'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
-import fs from 'node:fs/promises'
-import { AgentRuntime, ChatMessage, ProviderConfig, StreamEvent } from './runtime'
+import { AgentRuntime, AgentStreamEvent, ProviderConfig } from './runtime'
+import { runAgentTurn } from './agent'
+import { createSession, listSessions } from './sessions'
 
 let mainWindow: BrowserWindow | null = null
 const runtime = new AgentRuntime()
-const sessionsDir = () => path.join(app.getPath('userData'), 'sessions')
-
-type Session = { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[] }
-
-async function ensureSessionsDir() {
-  await fs.mkdir(sessionsDir(), { recursive: true })
-}
-
-async function readSessions(): Promise<Session[]> {
-  await ensureSessionsDir()
-  const names = (await fs.readdir(sessionsDir())).filter((name) => name.endsWith('.json'))
-  const sessions: Session[] = []
-  for (const name of names) {
-    try { sessions.push(JSON.parse(await fs.readFile(path.join(sessionsDir(), name), 'utf8')) as Session) } catch { /* ignore corrupt session */ }
-  }
-  return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-}
-
-async function writeSession(session: Session) {
-  await ensureSessionsDir()
-  await fs.writeFile(path.join(sessionsDir(), `${session.id}.json`), JSON.stringify(session, null, 2), 'utf8')
-  return session
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -58,14 +36,22 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  ipcMain.handle('session:list', () => readSessions())
-  ipcMain.handle('session:save', (_event, session: Session) => writeSession(session))
-  ipcMain.handle('session:create', async (_event, session: Session) => writeSession(session))
+  ipcMain.handle('session:list', () => listSessions())
+  ipcMain.handle('session:create', () => createSession())
   ipcMain.on('agent:cancel', (_event, requestId: string) => runtime.cancel(requestId))
-  ipcMain.on('agent:stream', async (event, payload: { requestId: string; messages: ChatMessage[]; provider: ProviderConfig }) => {
-    await runtime.stream(payload.messages, payload.provider, (streamEvent: StreamEvent) => {
+  ipcMain.on('agent:stream', (event, payload: { requestId: string; sessionId: string; content: string; provider: ProviderConfig }) => {
+    if (!payload?.sessionId || typeof payload.content !== 'string' || !payload.content.trim()) return
+    const emit = (streamEvent: AgentStreamEvent) => {
       if (!event.sender.isDestroyed()) event.sender.send('agent:stream-event', { requestId: payload.requestId, ...streamEvent })
-    }, payload.requestId)
+    }
+    void runAgentTurn({
+      runtime,
+      sessionId: payload.sessionId,
+      userText: payload.content.trim(),
+      provider: payload.provider,
+      requestId: payload.requestId,
+      emit
+    })
   })
 
   createWindow()
