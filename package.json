@@ -1,0 +1,38 @@
+{
+  "name": "maozhi-global",
+  "version": "0.1.0",
+  "private": true,
+  "description": "贸智全球桌面端 Agent 骨架",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p electron/tsconfig.json --watch --preserveWatchOutput\" \"wait-on http://127.0.0.1:5173 dist-electron/main.js && electron .\"",
+    "build": "vite build && tsc -p electron/tsconfig.json",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p electron/tsconfig.json --noEmit"
+  },
+  "build": {
+    "appId": "com.maozhi.global",
+    "productName": "贸智全球",
+    "directories": { "output": "release" },
+    "files": ["dist", "dist-electron", "package.json"],
+    "mac": { "target": ["dmg", "zip"] },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] }
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^32.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
+    "electron-builder": "^25.0.5",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "wait-on": "^8.0.1"
+  }
+}
