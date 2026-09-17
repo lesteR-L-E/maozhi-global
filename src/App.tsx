@@ -237,8 +237,7 @@ function App() {
           <div>
             <div className="panel-title">决策助手</div>
             <div className="panel-status">
-              <span className="online-dot" /> Agent 模式 · 已接入演示工具
-              greet_user
+              <span className="online-dot" /> Agent 模式 · 已接入四项业务分析工具
             </div>
           </div>
           <div className="header-actions" ref={historyAnchorRef}>

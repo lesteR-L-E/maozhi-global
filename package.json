@@ -15,7 +15,8 @@
     "appId": "com.maozhi.global",
     "productName": "贸智全球",
     "directories": { "output": "release" },
-    "files": ["dist", "dist-electron", "package.json"],
+    "files": ["dist", "dist-electron", "python", "data", "package.json"],
+    "asarUnpack": ["python/**", "data/**"],
     "mac": { "target": ["dmg", "zip"] },
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] }
   },

@@ -9,6 +9,18 @@ npm install
 npm run dev
 ```
 
+### Python 分析 Worker 初始化
+
+四个业务工具通过 Python Worker 读取本地 DuckDB 演示数据库。首次运行前执行：
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r python/requirements.txt
+.venv/bin/python python/build_demo_database.py
+```
+
+数据库文件为 `data/maozhi-demo.duckdb`，明确标记为比赛演示模拟数据。可以用 `MAOZHI_DATABASE` 指定其他数据库，用 `PYTHON_BIN` 指定其他 Python 解释器。Worker 协议和算法说明见 [python/README.md](python/README.md)。
+
 首次使用时，在项目根目录复制`.env.example`为`.env`并填写配置。设置中的非空 API Key、Base URL 和 Model 优先；对应字段留空时，主进程才读取`.env`环境变量。设置值仅保存在本机 localStorage，不会写入仓库。
 
 ## LLM环境变量
@@ -56,8 +68,8 @@ npm run dist
 
 ## 当前边界
 
-- 尚未接入贸易、客户、预测或任何业务工具；
-- 尚未接入 Python Worker；
+- 贸易、客户、预测工具当前读取固定模拟数据库，不是真实企业数据；
+- 正式数据接入时需要替换数据库内容并重新执行数据质量验收；
 - 地图目前是本地视觉占位，下一阶段替换为 GeoJSON/SVG 交互地图；
 - DeepSeek 请求使用 `/chat/completions`，可通过设置切换到 OpenAI Compatible Base URL；
 - 生产环境仍需补充密钥安全存储、流式输出、重试/取消、工具协议和离线兜底。
