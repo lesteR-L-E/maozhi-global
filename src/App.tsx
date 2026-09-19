@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { Workbench } from "./workbench/Workbench";
 
 type ChatBubble = {
   id: string;
@@ -49,6 +50,7 @@ function App() {
     baseUrl: localStorage.getItem("maozhi-base-url") || undefined,
   }));
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeRequest = useRef<{ id: string; cleanup: () => void } | null>(null);
   const historyAnchorRef = useRef<HTMLDivElement>(null);
 
@@ -90,6 +92,17 @@ function App() {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
   }, [messages, sending]);
+
+  // 输入框随内容增长；达到最大高度后才启用输入框自身的滚动。
+  useEffect(() => {
+    const node = inputRef.current;
+    if (!node) return;
+    node.style.height = "auto";
+    const maxHeight = 110;
+    const nextHeight = Math.min(node.scrollHeight, maxHeight);
+    node.style.height = `${nextHeight}px`;
+    node.style.overflowY = node.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [input]);
 
   async function refreshSessions() {
     setSessions(await window.maozhi.listSessions());
@@ -168,15 +181,22 @@ function App() {
           assistantText += streamEvent.content;
           upsertAssistant();
         } else if (streamEvent.type === "tool_start") {
-          setMessages((current) => [
-            ...current,
-            {
+          setMessages((current) => {
+            const toolMessage: ToolRecord = {
               id: streamEvent.callId,
               kind: "tool",
               name: streamEvent.name,
               status: "running",
-            },
-          ]);
+            };
+            // 工具调用属于当前回答的准备步骤，始终插在当前助手气泡之前。
+            const assistantIndex = current.findIndex((item) => item.id === assistantId);
+            if (assistantIndex < 0) return [...current, toolMessage];
+            return [
+              ...current.slice(0, assistantIndex),
+              toolMessage,
+              ...current.slice(assistantIndex),
+            ];
+          });
         } else if (streamEvent.type === "tool_result") {
           setMessages((current) =>
             current.map((item) =>
@@ -204,33 +224,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="map-stage" aria-label="全球市场地图占位区">
-        <div className="brand-lockup">
-          <div className="brand-mark">贸</div>
-          <div>
-            <div className="brand-name">贸智全球</div>
-            <div className="brand-subtitle">GLOBAL TRADE INTELLIGENCE</div>
-          </div>
-        </div>
-        <div className="map-placeholder">
-          <div className="map-grid" />
-          <div className="map-ring ring-one" />
-          <div className="map-ring ring-two" />
-          <div className="map-ring ring-three" />
-          <div className="map-copy">
-            <span className="eyebrow">MARKET OPPORTUNITY MAP</span>
-            <h1>全球市场决策工作台</h1>
-            <p>地图与市场机会标注将在下一阶段接入</p>
-          </div>
-          <span className="map-point point-one" />
-          <span className="map-point point-two" />
-          <span className="map-point point-three" />
-        </div>
-        <div className="stage-footer">
-          <span className="status-dot" /> 本地演示环境{" "}
-          <span className="footer-divider" /> 数据与地图模块待接入
-        </div>
-      </section>
+      <Workbench key={sessionId} messages={messages} onPrompt={(text) => { setInput(text); inputRef.current?.focus(); }} />
 
       <aside className="chat-panel">
         <header className="chat-header">
@@ -283,13 +277,13 @@ function App() {
             ),
           )}
           {sending && (
-            <div className="message-row assistant-row">
-              <div className="avatar assistant-avatar">贸</div>
-              <div className="typing-bubble">
-                <span />
-                <span />
-                <span />
-              </div>
+            // Floating status pill, not a message row: the streaming bubble
+            // already carries the assistant avatar, a second one read as a
+            // duplicate reply.
+            <div className="typing-float" role="status" aria-label="助手正在回复">
+              <span />
+              <span />
+              <span />
             </div>
           )}
         </div>
@@ -305,6 +299,7 @@ function App() {
           </div>
           <form className="composer" onSubmit={sendMessage}>
             <textarea
+              ref={inputRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {

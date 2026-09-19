@@ -28,6 +28,14 @@ Worker 使用“一行请求、一行响应”的 JSON 协议：
 
 可以用 `MAOZHI_DATABASE=/path/to/file.duckdb` 指定其他数据库。Electron 开发模式默认使用项目 `.venv/bin/python`；也可以用 `PYTHON_BIN` 指定Python解释器。
 
+## 冒烟测试
+
+不调用大模型、只验证数据库和四个工具链路：
+
+```bash
+npm run test:worker
+```
+
 ## 当前正式算法
 
 - 市场预测：`statsmodels.tsa.arima.model.ARIMA`，使用ARIMA(1,1,0)，最后12个月回测并输出MAE/RMSE/MAPE。

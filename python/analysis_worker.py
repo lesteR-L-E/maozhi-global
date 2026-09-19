@@ -108,7 +108,7 @@ def calculate_forecast(series: pd.Series) -> dict:
     full_model = ARIMA(values, order=(1, 1, 0), trend="t").fit()
     forecast = full_model.get_forecast(steps=12)
     interval = forecast.conf_int(alpha=0.20)
-    return {"horizon_months": 12, "values": [float(x) for x in forecast.predicted_mean], "interval": {"low": float(interval[0, 0]), "high": float(interval[-1, 1])}, "mae": mae, "rmse": rmse, "mape": mape, "points": len(values), "backtest_months": 12, "method": "ARIMA(1,1,0)", "enters_market_score": mape <= 25}
+    return {"horizon_months": 12, "values": [float(x) for x in forecast.predicted_mean], "interval": {"low": float(interval[0, 0]), "high": float(interval[-1, 1])}, "intervals": [{"low": float(row[0]), "high": float(row[1])} for row in interval], "confidence_level": 0.80, "mae": mae, "rmse": rmse, "mape": mape, "points": len(values), "backtest_months": 12, "method": "ARIMA(1,1,0)", "enters_market_score": mape <= 25}
 
 
 def analyze_markets(params: dict) -> dict:
@@ -131,7 +131,7 @@ def analyze_markets(params: dict) -> dict:
     # 统一取最后一个完整年度，供同比和评分使用。
     for market in markets:
         market_annual = annual[(annual.reporter_iso3 == market) & (annual.partner_code == 0)].sort_values("period")
-        market_monthly = monthly[monthly.reporter_iso3 == market].sort_values("period")
+        market_monthly = monthly[(monthly.reporter_iso3 == market) & (monthly.partner_code == 0) & (monthly.flow_code == "M")].sort_values("period")
         if market_annual.empty:
             continue
         imports = market_annual[market_annual.flow_code == "M"].sort_values("period")
@@ -147,6 +147,7 @@ def analyze_markets(params: dict) -> dict:
         market_macro = macro[(macro.iso3 == market) & (macro.year == 2025)]
         market_tariff = tariff[tariff.reporter_market_code == market]
         forecast = calculate_forecast(market_monthly.trade_value_usd.reset_index(drop=True))
+        forecast["periods"] = [str(period) for period in pd.period_range(pd.Period(str(market_monthly.iloc[-1].period), freq="M") + 1, periods=12, freq="M")]
         years = imports.trade_value_usd.to_numpy()
         cagr = float((years[-1] / years[0]) ** (1 / max(1, len(years) - 1)) - 1) if len(years) >= 2 and years[0] > 0 else None
         trade_competitiveness = None
@@ -157,6 +158,8 @@ def analyze_markets(params: dict) -> dict:
         rows.append({
             "market": market,
             "name_cn": countries[countries.iso3 == market].iloc[0].name_cn,
+            "annual_period": str(imports.iloc[-1].period),
+            "history": [{"period": str(row.period), "value": float(row.trade_value_usd)} for row in market_monthly.itertuples()],
             "annual_import": latest_import,
             "annual_export": float(exports.iloc[-1].trade_value_usd) if not exports.empty else None,
             "trade_balance": float(exports.iloc[-1].trade_value_usd - imports.iloc[-1].trade_value_usd) if not exports.empty else None,
@@ -305,7 +308,7 @@ def analyze_customers(params: dict) -> dict:
     for cluster_id, group in frame.groupby("cluster"):
         clusters.append({"cluster": int(cluster_id), "label": cluster_names.get(cluster_id, f"客户群{int(cluster_id) + 1}"), "size": len(group), "mean_value_score": round(float(group.value_score.mean()), 2)})
     customer_records = frame.drop(columns=["M_score", "F_score", "R_score", "G_score", "avg_order_interval_days", "D", "Fd", "Md", "recent_6_frequency", "previous_6_frequency", "recent_6_amount", "previous_6_amount"], errors="ignore").replace({np.nan: None}).to_dict(orient="records")
-    data = {"observation_date": observation.date().isoformat(), "customers": customer_records, "clusters": clusters, "cluster_model": {"algorithm": "K-means", "k": cluster_count, "selection": "轮廓系数主导、业务可解释性校验", "silhouette_score": best_score, "standardization": "StandardScaler"}, "value_model": {"formula": "0.5M'+0.2F'+0.1R'+0.2G'", "normalization": "全体客户池MinMaxScaler", "grades": {"S": 85, "A": 70, "B": 50}}, "churn_model": {"type": "规则评分，不是机器学习预测", "windows": "两个6个月", "grades": {"HIGH": 70, "MEDIUM": 40}, "new_customer_rule": "首单距今<6个月不参与K-means；<12个月不参与流失分级"}, "dataset_note": "比赛演示模拟数据，非真实企业数据"}
+    data = {"scope": {"market": market, "product": "ALL_PRODUCTS"}, "observation_date": observation.date().isoformat(), "customers": customer_records, "clusters": clusters, "cluster_model": {"algorithm": "K-means", "k": cluster_count, "selection": "轮廓系数主导、业务可解释性校验", "silhouette_score": best_score, "standardization": "StandardScaler"}, "value_model": {"formula": "0.5M'+0.2F'+0.1R'+0.2G'", "normalization": "全体客户池MinMaxScaler", "grades": {"S": 85, "A": 70, "B": 50}}, "churn_model": {"type": "规则评分，不是机器学习预测", "windows": "两个6个月", "grades": {"HIGH": 70, "MEDIUM": 40}, "new_customer_rule": "首单距今<6个月不参与K-means；<12个月不参与流失分级"}, "dataset_note": "比赛演示模拟数据，非真实企业数据"}
     return response(f"已完成{len(frame)}家演示客户的正式K-means分群、价值和流失风险分析。", data, ["客户数据为比赛演示模拟数据，价值分不代表利润，流失分不是概率。"])
 
 
@@ -324,7 +327,7 @@ def recommend_operations(params: dict) -> dict:
         if label.startswith("客户群"):
             label = ["高价值稳定", "成长型", "高价值风险", "低价值长尾"][int(cluster.get("cluster", 0)) % 4]
         cards.append({"recommendation_id": f"REC-{market}-{int(cluster.get('cluster', 0)) + 1:02d}", "target_market": market, "customer_segment": label, "customer_count": cluster.get("size", 0), "objective": "提升该市场客户经营效率", "actions": action_map[label], "cadence": cadence_map[label], "success_metrics": ["90天复购率", "样品转化率", "新市场首单周期"], "evidence": ["市场排名与评分", "客户分群、价值和风险等级"], "limits": ["第一版无执行回流，不代表成交承诺"]})
-    data = {"target_market": market, "cards": cards, "action_whitelist": sorted({action for actions in action_map.values() for action in actions}), "forbidden": ["具体价格", "折扣", "账期", "赠品"]}
+    data = {"target_market": market, "hs6": market_analysis.get("hs6"), "customer_scope": customer_analysis.get("scope"), "cards": cards, "action_whitelist": sorted({action for actions in action_map.values() for action in actions}), "forbidden": ["具体价格", "折扣", "账期", "赠品"]}
     return response(f"已生成{market}市场的{len(cards)}张差异化策略卡。", data, ["策略为建议方向，需企业在真实业务中验证。"])
 
 
