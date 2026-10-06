@@ -8,7 +8,7 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p electron/tsconfig.json --watch --preserveWatchOutput\" \"wait-on http://127.0.0.1:5173 dist-electron/main.js && electron .\"",
     "build": "vite build && tsc -p electron/tsconfig.json",
     "start": "electron .",
-    "test:worker": ".venv/bin/python python/smoke_test.py",
+    "test:worker": "node scripts/run-worker-smoke-test.mjs",
     "dist": "npm run build && electron-builder",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p electron/tsconfig.json --noEmit"
   },

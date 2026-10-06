@@ -73,7 +73,7 @@ export async function runAgentTurn(options: {
         emit({ type: 'tool_start', callId: call.id, name: call.function.name, argsText: call.function.arguments })
         const prerequisite = validateToolPrerequisite(call.function.name, call.function.arguments, messages)
         const toolResult = prerequisite
-          ? { ok: false, content: JSON.stringify({ ok: false, summary: prerequisite.message, evidence: [], dataQuality: { status: 'UNAVAILABLE', sourceType: 'SIMULATED_DEMO', missing: [], warnings: [] }, warnings: ['请按工具前置条件补齐信息。'], error: prerequisite }) }
+          ? { ok: false, content: JSON.stringify({ ok: false, summary: prerequisite.message, evidence: [], dataQuality: { status: 'UNAVAILABLE', sourceType: 'MIXED', missing: [], warnings: [] }, warnings: ['请按工具前置条件补齐信息。'], error: prerequisite }) }
           : await executeTool(call.function.name, call.function.arguments)
         emit({ type: 'tool_result', callId: call.id, name: call.function.name, ok: toolResult.ok, content: toolResult.content })
         messages.push({ role: 'tool', content: toolResult.content, tool_call_id: call.id, name: call.function.name })

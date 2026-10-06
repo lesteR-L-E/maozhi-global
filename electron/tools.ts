@@ -28,7 +28,7 @@ export type ToolDefinition = {
   execute: ToolExecutor
 }
 
-const QUALITY: DataQuality = { status: 'OK', sourceType: 'SIMULATED_DEMO', missing: [], warnings: [] }
+const QUALITY: DataQuality = { status: 'OK', sourceType: 'MIXED', missing: [], warnings: [] }
 // 开发时优先使用项目虚拟环境；打包时由构建流程提供对应平台的Python运行时。
 const projectPython = process.platform === 'win32'
   ? path.join(__dirname, '../.venv/Scripts/python.exe')
@@ -39,8 +39,8 @@ const workerPath = app.isPackaged
   ? path.join(process.resourcesPath, 'app.asar.unpacked/python/analysis_worker.py')
   : path.join(__dirname, '../python/analysis_worker.py')
 const defaultDatabasePath = app.isPackaged
-  ? path.join(process.resourcesPath, 'app.asar.unpacked/data/maozhi-demo.duckdb')
-  : path.join(__dirname, '../data/maozhi-demo.duckdb')
+  ? path.join(process.resourcesPath, 'app.asar.unpacked/data/maozhi-real.duckdb')
+  : path.join(__dirname, '../data/maozhi-real.duckdb')
 const databasePath = process.env.MAOZHI_DATABASE || defaultDatabasePath
 
 // Worker和数据库都支持通过环境变量替换，便于后续接入数据组的正式数据包。
@@ -65,8 +65,8 @@ async function callPython(method: string, params: Record<string, unknown>): Prom
     }
     const timer = setTimeout(() => {
       child.kill()
-      finish({ ok: false, summary: 'Python分析Worker超时。', evidence: [], dataQuality: { ...QUALITY, status: 'UNAVAILABLE', warnings: ['Worker超过15秒未返回'] }, warnings: ['请检查Python运行环境。'], error: { code: 'PYTHON_TIMEOUT', message: '分析Worker超时' } })
-    }, 15000)
+      finish({ ok: false, summary: 'Python分析Worker超时。', evidence: [], dataQuality: { ...QUALITY, status: 'UNAVAILABLE', warnings: ['Worker超过60秒未返回'] }, warnings: ['请检查Python运行环境。'], error: { code: 'PYTHON_TIMEOUT', message: '分析Worker超时' } })
+    }, 60000)
     child.stdout.on('data', (chunk) => { stdout += chunk.toString() })
     child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
     child.on('error', (error) => finish({ ok: false, summary: '无法启动Python分析Worker。', evidence: [], dataQuality: { ...QUALITY, status: 'UNAVAILABLE', warnings: [stderr || error.message] }, warnings: ['请安装Python 3并确认PYTHON_BIN配置。'], error: { code: 'PYTHON_START_FAILED', message: error.message } }))
@@ -103,11 +103,12 @@ const resolveProduct: ToolDefinition = {
     type: 'function',
     function: {
       name: 'resolve_product',
-      description: '将商品名称或HS编码解析为候选HS编码。多候选或低置信度时必须让用户确认，不能擅自选择。',
+      description: '在HS维表中将商品名称或HS编码解析为候选HS编码。中文商品可同时提供英文检索词。所有候选均来自数据库，名称检索结果必须让用户确认。',
       parameters: {
         type: 'object',
         properties: {
-          product_name: { type: 'string', description: '商品名称或HS编码' }
+          product_name: { type: 'string', description: '用户提供的商品名称或HS编码' },
+          search_terms_en: { type: 'string', description: '可选。根据用户原始描述生成的简洁英文商品检索词，只用于检索数据库，不能直接填写或猜测HS编码。' }
         },
         required: ['product_name']
       }
@@ -115,7 +116,11 @@ const resolveProduct: ToolDefinition = {
   },
   execute: async (args) => {
     const productName = textArg(args, 'product_name') || ''
-    const result = await callPython('resolve_product', { product_name: productName })
+    const searchTermsEn = textArg(args, 'search_terms_en')
+    const result = await callPython('resolve_product', {
+      product_name: productName,
+      ...(searchTermsEn ? { search_terms_en: searchTermsEn } : {})
+    })
     return wrap(result)
   }
 }
@@ -125,12 +130,12 @@ const analyzeMarkets: ToolDefinition = {
     type: 'function',
     function: {
       name: 'analyze_markets',
-      description: '基于已确认HS编码分析RCEP市场，返回东盟5国地图数据、贸易指标、关税、宏观环境、预测和综合评分。必须先有confirmed_hs6；数据不足必须降级并说明。',
+      description: '基于已确认HS编码分析数据库支持的RCEP15市场，返回地图数据、贸易指标、关税、宏观环境、预测和综合评分。必须先有confirmed_hs6；可用markets指定RCEP国家ISO3列表；数据不足必须降级并说明。',
       parameters: {
         type: 'object',
         properties: {
           confirmed_hs6: { type: 'string', description: '用户确认的6位HS编码' },
-          markets: { type: 'array', items: { type: 'string' }, description: '可选市场ISO3列表，默认东盟5国' },
+          markets: { type: 'array', items: { type: 'string' }, description: '可选RCEP市场ISO3列表，默认数据库支持的全部RCEP15国家' },
           include_forecast: { type: 'boolean', description: '是否计算预测，默认true' }
         },
         required: ['confirmed_hs6']
@@ -149,7 +154,7 @@ const analyzeCustomers: ToolDefinition = {
     type: 'function',
     function: {
       name: 'analyze_customers',
-      description: '分析固定演示客户数据：RFM+G+I、K-means客户分群、交易价值S/A/B/C、流失风险规则评分和画像。客户为模拟数据，不能表述为真实客户或流失概率。',
+      description: '分析项目客户数据：RFM+G+I、K-means客户分群、交易价值S/A/B/C、流失风险规则评分和画像。当前客户与交易数据为比赛模拟数据，不能表述为真实客户或流失概率。',
       parameters: {
         type: 'object',
         properties: {
