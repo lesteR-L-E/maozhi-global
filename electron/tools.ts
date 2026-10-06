@@ -51,7 +51,9 @@ async function callPython(method: string, params: Record<string, unknown>): Prom
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        MAOZHI_DATABASE: databasePath
+        MAOZHI_DATABASE: databasePath,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8'
       }
     })
     let stdout = ''
